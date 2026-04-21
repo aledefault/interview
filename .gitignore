@@ -15,9 +15,15 @@ TAGS
 .idea/*
 .idea_modules
 .DS_Store
+.vscode
 .sbtrc
 *.sublime-project
 *.sublime-workspace
 tests.iml
 # Auto-copied by sbt-microsites
 docs/src/main/tut/contributing.md
+
+# Ignore forex-mtl target data
+forex-mtl/project/*.*
+forex-mtl/target/*.*
+.metals
