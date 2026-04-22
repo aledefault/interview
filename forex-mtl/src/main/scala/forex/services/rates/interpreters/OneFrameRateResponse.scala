@@ -12,7 +12,7 @@ final case class OneFrameRateResponse(
   bid: BigDecimal,
   ask: BigDecimal,
   price: BigDecimal,
-  timeStamp: OffsetDateTime)
+  time_stamp: OffsetDateTime)
 
 object OneFrameRateResponse {
   implicit val configuration: Configuration = Configuration.default.withSnakeCaseMemberNames
