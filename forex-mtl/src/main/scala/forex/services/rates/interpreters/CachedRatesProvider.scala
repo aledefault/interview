@@ -51,10 +51,10 @@ final class CachedRatesProvider[F[_]](
     if (retriesLeft <= 0) {
       F.delay(ratesSnapshotRef.get()).map {
         case Some(snapshot) => findRate(snapshot.values, pair)
-        case None => Left(Error.RateLookupFailed)
+        case None => Left(Error.ExternalServiceError("Unable to refresh rates. Please, check external service's health."))
       }
     } else {
-      // TODO: Pooling is enough for the test, but there must be a better way, using Deferred?
+      // TODO: Pooling is enough for the test, but there must be a better way, using Deferred? And retries/resilence with Retry?
       timer.sleep(loadingRetryDelay) *> F.delay(ratesSnapshotRef.get()).flatMap {
           case None => waitForRatesSnapshot(pair, retriesLeft - 1)
           case Some(snapshot) if snapshot.isRefreshing => waitForRatesSnapshot(pair, retriesLeft - 1)
@@ -132,6 +132,6 @@ final class CachedRatesProvider[F[_]](
     }
 
   private def findRate(values: Map[Rate.Pair, Rate], pair: Rate.Pair): Either[Error, Rate] =
-    values.get(pair).toRight(Error.RateLookupFailed)
+    values.get(pair).toRight(Error.UnsupportedRate(s"Rate from ${pair.from} to ${pair.to} is not supported."))
 
 }

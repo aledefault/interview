@@ -7,7 +7,7 @@ import forex.domain.{Currency, Price, Rate, Timestamp}
 import forex.services.rates.RatesProvider
 import forex.services.rates.errors._
 import org.http4s.Method.GET
-import org.http4s.{Header, Request, Uri}
+import org.http4s.{Header, Request, Status, Uri}
 import org.http4s.client.Client
 import org.http4s.circe.CirceEntityCodec._
 import org.typelevel.ci.CIString
@@ -19,39 +19,54 @@ class OneFrameRatesProvider[F[_]: Sync](httpClient: Client[F], config: Applicati
       uri = buildUri(pair, config)
     ).putHeaders(Header.Raw(CIString("token"), config.oneFrame.token))
 
-    httpClient.expect[List[OneFrameRateResponse]](request).map { body =>
-        val price = extractPrice(body)
-        Rate(pair, Price(price), Timestamp.now).asRight[Error]
-      }.handleError(error => Error.OneFrameLookupFailed(error.getMessage).asLeft[Rate])
+    httpClient.run(request).use { response =>
+      response.status match {
+        case Status.Ok =>
+          response.as[List[OneFrameRateResponse]].map {
+            case head :: _ => toDomainRate(head).asRight[Error]
+            case Nil => Error.ExternalServiceError("Invalid success body: empty list").asLeft[Rate]
+          }.handleError { error =>
+            Error.ExternalServiceError(s"Invalid success body: ${error.getMessage}").asLeft[Rate]
+          }
+
+        case status =>
+          Sync[F].pure(Error.ExternalServiceError(s"Unexpected status: $status").asLeft[Rate])
+      }
+    }
   }
 
   private def buildUri(pair: Rate.Pair, config: ApplicationConfig): Uri =
     Uri.unsafeFromString(s"${config.oneFrame.baseUri}/rates?pair=${pair.from}${pair.to}")
 
-  private def extractPrice(body: List[OneFrameRateResponse]): BigDecimal = body(0).price //TODO: Add error handling
-
   override def getAll: F[Error Either List[Rate]] = {
     val pairs = supportedPairs
-    val pairQuery = pairs.map(pairToString).mkString("&")
+    val pairQuery = pairs.map(pairToQueryStringPair).mkString("&")
 
     val request = Request[F](
       method = GET,
-      uri = buildAllUri(pairQuery, config)
+      uri = buildAllRatesUri(pairQuery, config)
     ).putHeaders(Header.Raw(CIString("token"), config.oneFrame.token))
 
-    httpClient
-      .expect[List[OneFrameRateResponse]](request)
-      .map { body =>
-        body.map(toDomainRate).asRight[Error]
+    httpClient.run(request).use { response =>
+      response.status match {
+        case Status.Ok =>
+          response.as[List[OneFrameRateResponse]].map {
+            case Nil => Error.ExternalServiceError("Invalid success body: empty list").asLeft[List[Rate]]
+            case body => body.map(toDomainRate).asRight[Error]
+          }.handleError { error =>
+            Error.ExternalServiceError(s"Invalid success body: ${error.getMessage}").asLeft[List[Rate]]
+          }
+
+        case status =>
+          Sync[F].pure(Error.ExternalServiceError(s"Unexpected status: $status").asLeft[List[Rate]])
       }
-      .handleError(error => Error.OneFrameLookupFailed(error.getMessage).asLeft[List[Rate]])
+    }
   }
 
-  private def buildAllUri(pairQuery: String, config: ApplicationConfig): Uri =
+  private def buildAllRatesUri(pairQuery: String, config: ApplicationConfig): Uri =
     Uri.unsafeFromString(s"${config.oneFrame.baseUri}/rates?$pairQuery")
 
-  private def pairToString(pair: Rate.Pair): String =
-    s"pair=${pair.from}${pair.to}"
+  private def pairToQueryStringPair(pair: Rate.Pair): String = s"pair=${pair.from}${pair.to}"
 
   private def toDomainRate(response: OneFrameRateResponse): Rate =
     Rate(

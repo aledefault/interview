@@ -9,7 +9,7 @@ import forex.services.rates.RatesProvider
 class RatesProgram[F[_]: Functor](ratesProvider: RatesProvider[F]) extends Rates[F] {
 
   override def get(request: Protocol.GetRatesRequest): F[Error Either Rate] =
-    EitherT(ratesProvider.get(Rate.Pair(request.from, request.to))).leftMap(toProgramError(_)).value
+    EitherT(ratesProvider.get(Rate.Pair(request.from, request.to))).leftMap(toProgramError).value
 
 }
 
