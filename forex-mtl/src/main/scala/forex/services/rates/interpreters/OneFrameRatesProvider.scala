@@ -23,16 +23,16 @@ class OneFrameRatesProvider[F[_]: Sync](httpClient: Client[F], config: Applicati
       response.status match {
         case Status.Ok =>
           response.as[List[OneFrameRateResponse]].map {
-            case head :: _ => toDomainRate(head).asRight[Error]
-            case Nil => Error.ExternalServiceError("Invalid success body: empty list").asLeft[Rate]
+            case head :: _ => Either.right[Error, Rate](toDomainRate(head))
+            case Nil => Either.left[Error, Rate](Error.ExternalServiceError("Invalid success body: empty list"))
           }.handleError { error =>
-            Error.ExternalServiceError(s"Invalid success body: ${error.getMessage}").asLeft[Rate]
+            Either.left[Error, Rate](Error.ExternalServiceError(s"Invalid success body: ${error.getMessage}"))
           }
 
         case status =>
-          Sync[F].pure(Error.ExternalServiceError(s"Unexpected status: $status").asLeft[Rate])
+          Sync[F].pure(Either.left[Error, Rate](Error.ExternalServiceError(s"Unexpected status: $status")))
       }
-    }
+    }.handleError(error => Either.left[Error, Rate](Error.ExternalServiceError(s"Unexpected error: ${error.getMessage}")))
   }
 
   private def buildUri(pair: Rate.Pair, config: ApplicationConfig): Uri =
@@ -51,16 +51,16 @@ class OneFrameRatesProvider[F[_]: Sync](httpClient: Client[F], config: Applicati
       response.status match {
         case Status.Ok =>
           response.as[List[OneFrameRateResponse]].map {
-            case Nil => Error.ExternalServiceError("Invalid success body: empty list").asLeft[List[Rate]]
-            case body => body.map(toDomainRate).asRight[Error]
+            case Nil => Either.left[Error, List[Rate]](Error.ExternalServiceError("Invalid success body: empty list"))
+            case body => Either.right[Error, List[Rate]](body.map(toDomainRate))
           }.handleError { error =>
-            Error.ExternalServiceError(s"Invalid success body: ${error.getMessage}").asLeft[List[Rate]]
+            Either.left[Error, List[Rate]](Error.ExternalServiceError(s"Invalid success body: ${error.getMessage}"))
           }
 
         case status =>
-          Sync[F].pure(Error.ExternalServiceError(s"Unexpected status: $status").asLeft[List[Rate]])
+          Sync[F].pure(Either.left[Error, List[Rate]](Error.ExternalServiceError(s"Unexpected status: $status")))
       }
-    }
+    }.handleError(error => Either.left[Error, List[Rate]](Error.ExternalServiceError(s"Unexpected error: ${error.getMessage}")))
   }
 
   private def buildAllRatesUri(pairQuery: String, config: ApplicationConfig): Uri =
