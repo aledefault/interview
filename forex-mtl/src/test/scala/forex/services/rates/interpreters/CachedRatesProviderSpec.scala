@@ -10,6 +10,7 @@ import io.circe.generic.semiauto._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.time.OffsetDateTime
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.DurationInt
 import scala.util.Random
@@ -88,6 +89,35 @@ class CachedRatesProviderSpec extends AnyFlatSpec with Matchers {
     result shouldBe Left(Error.ExternalServiceError("boom"))
   }
 
+  it should "not keep an empty snapshot after a failed refresh" in {
+    val ratePair = Rate.Pair(Currency.USD, Currency.JPY)
+    val fakeProvider = new TestRatesProvider[IO](
+      getImpl = _ => IO.pure(Left(ExternalServiceError("This implementation don't use single get."))),
+      getAllImpl = IO.pure(Left(ExternalServiceError("boom")))
+    )
+    val provider = new CachedRatesProvider[IO](fakeProvider)
+
+    val result1 = provider.get(ratePair).unsafeRunSync()
+    val result2 = provider.get(ratePair).unsafeRunSync()
+
+    result1 shouldBe Left(Error.ExternalServiceError("boom"))
+    result2 shouldBe Left(Error.ExternalServiceError("boom"))
+  }
+
+  it should "reject stale rates returned by the upstream provider" in {
+    val ratePair = Rate.Pair(Currency.USD, Currency.JPY)
+    val staleTimestamp = Timestamp(OffsetDateTime.now.minusMinutes(6))
+    val fakeProvider = new TestRatesProvider[IO](
+      getImpl = _ => IO.pure(Left(ExternalServiceError("This implementation don't use single get."))),
+      getAllImpl = IO.pure(Right(List(Rate(ratePair, Price(BigDecimal("156.25")), staleTimestamp))))
+    )
+    val provider = new CachedRatesProvider[IO](fakeProvider)
+
+    val result = provider.get(ratePair).unsafeRunSync()
+
+    result shouldBe Left(Error.LookupFailed("Received stale rates from upstream service."))
+  }
+
   "CachedRatesProvider.getAll" should "successfully get rate pairs" in {
     val now = Timestamp.now
     val ratePairs = Rate.Pair(Currency.USD, Currency.JPY)::Rate.Pair(Currency.EUR, Currency.JPY)::Nil
@@ -125,6 +155,20 @@ class CachedRatesProviderSpec extends AnyFlatSpec with Matchers {
     result shouldBe Left(Error.ExternalServiceError("boom"))
   }
 
+  it should "reject stale rate snapshots returned by the upstream provider" in {
+    val ratePair = Rate.Pair(Currency.USD, Currency.JPY)
+    val staleTimestamp = Timestamp(OffsetDateTime.now.minusMinutes(6))
+    val fakeProvider = new TestRatesProvider[IO](
+      getImpl = _ => IO.pure(Left(ExternalServiceError("This implementation don't use single get."))),
+      getAllImpl = IO.pure(Right(List(Rate(ratePair, Price(BigDecimal("156.25")), staleTimestamp))))
+    )
+    val provider = new CachedRatesProvider[IO](fakeProvider)
+
+    val result = provider.getAll.unsafeRunSync()
+
+    result shouldBe Left(Error.LookupFailed("Received stale rates from upstream service."))
+  }
+
   it should "refresh cache rate when stale" in {
     val ratePair = Rate.Pair(Currency.USD, Currency.JPY)
     val fakeProvider = new TestRatesProvider[IO](
@@ -145,8 +189,8 @@ class CachedRatesProviderSpec extends AnyFlatSpec with Matchers {
   implicit val timer: Timer[IO] = IO.timer(ExecutionContext.global)
 
   final class TestRatesProvider[F[_]](
-   getImpl: Rate.Pair => F[Error Either Rate],
-   getAllImpl: F[Error Either List[Rate]]
+    getImpl: Rate.Pair => F[Error Either Rate],
+    getAllImpl: F[Error Either List[Rate]]
   ) extends RatesProvider[F] {
 
     override def get(pair: Rate.Pair): F[Error Either Rate] = getImpl(pair)

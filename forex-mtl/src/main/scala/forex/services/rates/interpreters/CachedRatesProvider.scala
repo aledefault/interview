@@ -17,7 +17,8 @@ final class CachedRatesProvider[F[_]](
   ratesProvider: RatesProvider[F],
   ttl: FiniteDuration = 180.seconds,
   retryDelay: FiniteDuration = 100.millis,
-  maxRetries: Int = 20
+  maxRetries: Int = 20,
+  maxRateAge: FiniteDuration = 300.seconds
 )(implicit
   F: Concurrent[F],
   timer: Timer[F]
@@ -28,7 +29,7 @@ final class CachedRatesProvider[F[_]](
 
   override def get(pair: Rate.Pair): F[Error Either Rate] =
     F.delay(ratesSnapshotRef.get()).flatMap {
-      case Some(snapshot) if !snapshot.isStale(Instant.now(), ttl) =>
+      case Some(snapshot) if !snapshotNeedsRefresh(snapshot, Instant.now()) =>
         F.pure(findRate(snapshot.values, pair))
 
       case Some(snapshot) if snapshot.isRefreshing =>
@@ -49,18 +50,18 @@ final class CachedRatesProvider[F[_]](
 
   private def processRefreshResult(result: F[Error Either List[Rate]], pair: Rate.Pair): F[Error Either Rate] =
     result.flatMap {
-        case Left(error) => F.pure(error.asLeft[Rate])
+      case Left(error) => F.pure(error.asLeft[Rate])
 
-        // TODO: Refactor this discard and waitForRatesSnapshotRefresh return.
-        case Right(_) => F.delay(ratesSnapshotRef.get()).map {
-          case None =>
-            Error.LookupFailed("Max refresh retries reached.").asLeft[Rate]
-          case Some(snapshot) if snapshot.isStale(Instant.now, ttl) =>
-            Error.LookupFailed("Max refresh retries reached. The rate is stale.").asLeft[Rate]
-          case Some(snapshot) =>
-            findRate(snapshot.values, pair)
-        }
+      // TODO: Refactor this discard and waitForRatesSnapshotRefresh return.
+      case Right(_) => F.delay(ratesSnapshotRef.get()).map {
+        case None =>
+          Error.LookupFailed("Max refresh retries reached.").asLeft[Rate]
+        case Some(snapshot) if snapshotNeedsRefresh(snapshot, Instant.now()) =>
+          Error.LookupFailed("Max refresh retries reached. The rate is stale.").asLeft[Rate]
+        case Some(snapshot) =>
+          findRate(snapshot.values, pair)
       }
+    }
 
   private def refreshOrWait(pair: Rate.Pair, refreshing: Boolean): F[Error Either Rate] =
     if (refreshing) refreshAllRates.map(_.flatMap(findRate(_, pair)))
@@ -68,20 +69,20 @@ final class CachedRatesProvider[F[_]](
 
   override def getAll: F[Error Either List[Rate]] =
     F.delay(ratesSnapshotRef.get()).flatMap {
-      case Some(snapshot) if !snapshot.isStale(Instant.now(), ttl) =>
+      case Some(snapshot) if !snapshotNeedsRefresh(snapshot, Instant.now()) =>
         F.pure(snapshot.values.values.toList.asRight[Error])
 
       case Some(snapshot) if snapshot.isRefreshing =>
-          waitForRatesSnapshotRefresh
+        waitForRatesSnapshotRefresh
 
       case atomicSnapshot @ Some(snapshot)  =>
-          F.delay {
-            val loading = snapshot.copy(isRefreshing = true)
-            ratesSnapshotRef.compareAndSet(atomicSnapshot, Some(loading))
-          }.flatMap { refreshing =>
-            if (refreshing) refreshAllRates.map(_.map(_.values.toList))
-            else waitForRatesSnapshotRefresh
-          }
+        F.delay {
+          val loading = snapshot.copy(isRefreshing = true)
+          ratesSnapshotRef.compareAndSet(atomicSnapshot, Some(loading))
+        }.flatMap { refreshing =>
+          if (refreshing) refreshAllRates.map(_.map(_.values.toList))
+          else waitForRatesSnapshotRefresh
+        }
       case None =>
         F.delay {
           val newSnapshot = RatesSnapshot(Map.empty, Instant.now, isRefreshing = true)
@@ -104,7 +105,7 @@ final class CachedRatesProvider[F[_]](
 
   private def readFreshSnapshot: F[Option[List[Rate]]] =
     F.delay(ratesSnapshotRef.get()).map {
-      case Some(snapshot) if !snapshot.isRefreshing && !snapshot.isStale(Instant.now(), ttl) =>
+      case Some(snapshot) if !snapshot.isRefreshing && !snapshotNeedsRefresh(snapshot, Instant.now()) =>
         Some(snapshot.values.values.toList)
       case _ =>
         None
@@ -113,35 +114,49 @@ final class CachedRatesProvider[F[_]](
   private def refreshAllRates: F[Error Either Map[Rate.Pair, Rate]] =
     ratesProvider.getAll.flatMap {
       case Right(newRates) =>
-        val mapped = newRates.map(rate => rate.pair -> rate).toMap
+        val now = Instant.now()
+        if (containsStaleRates(newRates, now)) {
+          completeFailedRefresh(Error.LookupFailed("Received stale rates from upstream service."))
+        } else {
+          val mapped = newRates.map(rate => rate.pair -> rate).toMap
 
-        F.delay {
-          ratesSnapshotRef.set(
-            Some(
-              RatesSnapshot(
-                values = mapped,
-                lastUpdated = Instant.now(),
-                isRefreshing = false
+          F.delay {
+            ratesSnapshotRef.set(
+              Some(
+                RatesSnapshot(
+                  values = mapped,
+                  lastUpdated = now,
+                  isRefreshing = false
+                )
               )
             )
-          )
-        } *> F.pure(mapped.asRight[Error])
+          } *> F.pure(mapped.asRight[Error])
+        }
 
       // Refresh failed, so we reset isRefreshing
       // We should circuit break in these cases per a couple of second to avoid server starvation
       case Left(error) =>
-        F.delay {
-          val current = ratesSnapshotRef.get()
-          current match {
-            case Some(snapshot) =>
-              ratesSnapshotRef.set(Some(snapshot.copy(isRefreshing = false)))
-            case None =>
-              ratesSnapshotRef.set(None)
-          }
-        } *> F.pure(error.asLeft[Map[Rate.Pair, Rate]])
+        completeFailedRefresh(error)
     }
 
   private def findRate(values: Map[Rate.Pair, Rate], pair: Rate.Pair): Either[Error, Rate] =
     values.get(pair).toRight(Error.UnsupportedRate(s"Rate from ${pair.from} to ${pair.to} is not supported."))
+
+  private def snapshotNeedsRefresh(snapshot: RatesSnapshot, now: Instant): Boolean =
+    snapshot.isStale(now, ttl) || containsStaleRates(snapshot.values.values, now)
+
+  private def containsStaleRates(rates: Iterable[Rate], now: Instant): Boolean =
+    rates.exists(_.timestamp.isOlderThan(now, maxRateAge))
+
+  private def completeFailedRefresh[A](error: Error): F[Error Either A] =
+    F.delay {
+      val current = ratesSnapshotRef.get()
+      current match {
+        case Some(snapshot) if snapshot.values.nonEmpty =>
+          ratesSnapshotRef.set(Some(snapshot.copy(isRefreshing = false)))
+        case _ =>
+          ratesSnapshotRef.set(None)
+      }
+    } *> F.pure(error.asLeft[A])
 
 }

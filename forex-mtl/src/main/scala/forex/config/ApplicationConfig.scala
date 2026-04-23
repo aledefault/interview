@@ -23,4 +23,5 @@ case class CacheRatesConfig(
     ttl: FiniteDuration,
     retryDelay: FiniteDuration,
     maxRetries: Int,
+    maxRateAge: FiniteDuration
 )
