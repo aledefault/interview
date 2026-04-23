@@ -1,7 +1,7 @@
 package forex.services.rates.interpreters
 
 import cats.effect.IO
-import forex.config.{ApplicationConfig, OneFrameConfig}
+import forex.config.{ApplicationConfig, CacheRatesConfig, OneFrameConfig}
 import forex.domain.{Currency, Price, Rate, Timestamp}
 import forex.services.rates.errors.Error
 import io.circe.Encoder
@@ -15,6 +15,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.time.OffsetDateTime
+import scala.concurrent.duration.DurationInt
 
 class OneFrameRatesProviderSpec extends AnyFlatSpec with Matchers {
 
@@ -23,6 +24,11 @@ class OneFrameRatesProviderSpec extends AnyFlatSpec with Matchers {
     oneFrame = OneFrameConfig(
       baseUri = "http://localhost",
       token = "test-token"
+    ),
+    cacheRates = CacheRatesConfig(
+      ttl = 180.second,
+      retryDelay = 50.millis,
+      maxRetries = 10
     )
   )
 

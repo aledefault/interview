@@ -4,7 +4,8 @@ import scala.concurrent.duration.FiniteDuration
 
 case class ApplicationConfig(
     http: HttpConfig,
-    oneFrame: OneFrameConfig
+    oneFrame: OneFrameConfig,
+    cacheRates: CacheRatesConfig
 )
 
 case class HttpConfig(
@@ -16,4 +17,10 @@ case class HttpConfig(
 case class OneFrameConfig(
     baseUri: String,
     token: String
+)
+
+case class CacheRatesConfig(
+    ttl: FiniteDuration,
+    retryDelay: FiniteDuration,
+    maxRetries: Int,
 )

@@ -8,7 +8,8 @@ import org.http4s.client.Client
 
 object RatesProviders {
   def dummy[F[_]: Applicative]: RatesProvider[F] = new DummyRatesProvider[F]()
-  def live[F[_]: Sync](httpClient: Client[F], config: ApplicationConfig): RatesProvider[F] = new OneFrameRatesProvider[F](httpClient, config)
-  def cached[F[_]: Concurrent: Timer](live: RatesProvider[F]): RatesProvider[F] = new CachedRatesProvider[F](live, ttlSeconds = 120 )
-  //TODO: Check these implicit dependencies
+  def live[F[_]: Sync](httpClient: Client[F], config: ApplicationConfig): RatesProvider[F] =
+    new OneFrameRatesProvider[F](httpClient, config.oneFrame.token, config.oneFrame.baseUri)
+  def cached[F[_]: Concurrent: Timer](live: RatesProvider[F], config: ApplicationConfig): RatesProvider[F] =
+    new CachedRatesProvider[F](live, config.cacheRates.ttl, config.cacheRates.retryDelay, config.cacheRates.maxRetries)
 }

@@ -2,7 +2,6 @@ package forex.services.rates.interpreters
 
 import cats.effect.Sync
 import cats.implicits._
-import forex.config.ApplicationConfig
 import forex.domain.{Currency, Price, Rate, Timestamp}
 import forex.services.rates.RatesProvider
 import forex.services.rates.errors._
@@ -12,12 +11,16 @@ import org.http4s.client.Client
 import org.http4s.circe.CirceEntityCodec._
 import org.typelevel.ci.CIString
 
-class OneFrameRatesProvider[F[_]: Sync](httpClient: Client[F], config: ApplicationConfig) extends RatesProvider[F] {
+class OneFrameRatesProvider[F[_]: Sync](
+  httpClient: Client[F],
+  token: String,
+  baseUri: String) extends RatesProvider[F] {
+
   override def get(pair: Rate.Pair): F[Error Either Rate] = {
     val request = Request[F](
       method = GET,
-      uri = buildUri(pair, config)
-    ).putHeaders(Header.Raw(CIString("token"), config.oneFrame.token))
+      uri = buildUri(pair)
+    ).putHeaders(Header.Raw(CIString("token"), token))
 
     httpClient.run(request).use { response =>
       response.status match {
@@ -35,8 +38,8 @@ class OneFrameRatesProvider[F[_]: Sync](httpClient: Client[F], config: Applicati
     }.handleError(error => Either.left[Error, Rate](Error.ExternalServiceError(s"Unexpected error: ${error.getMessage}")))
   }
 
-  private def buildUri(pair: Rate.Pair, config: ApplicationConfig): Uri =
-    Uri.unsafeFromString(s"${config.oneFrame.baseUri}/rates?pair=${pair.from}${pair.to}")
+  private def buildUri(pair: Rate.Pair): Uri =
+    Uri.unsafeFromString(s"${baseUri}/rates?pair=${pair.from}${pair.to}")
 
   override def getAll: F[Error Either List[Rate]] = {
     val pairs = supportedPairs
@@ -44,8 +47,8 @@ class OneFrameRatesProvider[F[_]: Sync](httpClient: Client[F], config: Applicati
 
     val request = Request[F](
       method = GET,
-      uri = buildAllRatesUri(pairQuery, config)
-    ).putHeaders(Header.Raw(CIString("token"), config.oneFrame.token))
+      uri = buildAllRatesUri(pairQuery)
+    ).putHeaders(Header.Raw(CIString("token"), token))
 
     httpClient.run(request).use { response =>
       response.status match {
@@ -63,8 +66,8 @@ class OneFrameRatesProvider[F[_]: Sync](httpClient: Client[F], config: Applicati
     }.handleError(error => Either.left[Error, List[Rate]](Error.ExternalServiceError(s"Unexpected error: ${error.getMessage}")))
   }
 
-  private def buildAllRatesUri(pairQuery: String, config: ApplicationConfig): Uri =
-    Uri.unsafeFromString(s"${config.oneFrame.baseUri}/rates?$pairQuery")
+  private def buildAllRatesUri(pairQuery: String): Uri =
+    Uri.unsafeFromString(s"${baseUri}/rates?$pairQuery")
 
   private def pairToQueryStringPair(pair: Rate.Pair): String = s"pair=${pair.from}${pair.to}"
 

@@ -15,20 +15,20 @@ import scala.concurrent.duration._
 
 final class CachedRatesProvider[F[_]](
   ratesProvider: RatesProvider[F],
-  ttlSeconds: Long = 120,
-  loadingRetryDelay: FiniteDuration = 50.millis,
-  loadingMaxRetries: Int = 20
+  ttl: FiniteDuration = 180.seconds,
+  retryDelay: FiniteDuration = 100.millis,
+  maxRetries: Int = 20
 )(implicit
   F: Concurrent[F],
   timer: Timer[F]
 ) extends RatesProvider[F] {
 
   private val ratesSnapshotRef = new AtomicReference[Option[RatesSnapshot]](None)
-  private val refreshWaitPolicy: RetryPolicy[F] = limitRetries[F](loadingMaxRetries) join constantDelay[F](loadingRetryDelay) // It could be done with a Jitter for better results, but I'm prioritizing other things
+  private val refreshWaitPolicy: RetryPolicy[F] = limitRetries[F](maxRetries) join constantDelay[F](retryDelay) // It could be done with a Jitter for better results, but I'm prioritizing other things
 
   override def get(pair: Rate.Pair): F[Error Either Rate] =
     F.delay(ratesSnapshotRef.get()).flatMap {
-      case Some(snapshot) if !snapshot.isStale(Instant.now(), ttlSeconds) =>
+      case Some(snapshot) if !snapshot.isStale(Instant.now(), ttl) =>
         F.pure(findRate(snapshot.values, pair))
 
       case Some(snapshot) if snapshot.isRefreshing =>
@@ -55,7 +55,7 @@ final class CachedRatesProvider[F[_]](
         case Right(_) => F.delay(ratesSnapshotRef.get()).map {
           case None =>
             Error.LookupFailed("Max refresh retries reached.").asLeft[Rate]
-          case Some(snapshot) if snapshot.isStale(Instant.now, ttlSeconds) =>
+          case Some(snapshot) if snapshot.isStale(Instant.now, ttl) =>
             Error.LookupFailed("Max refresh retries reached. The rate is stale.").asLeft[Rate]
           case Some(snapshot) =>
             findRate(snapshot.values, pair)
@@ -68,7 +68,7 @@ final class CachedRatesProvider[F[_]](
 
   override def getAll: F[Error Either List[Rate]] =
     F.delay(ratesSnapshotRef.get()).flatMap {
-      case Some(snapshot) if !snapshot.isStale(Instant.now(), ttlSeconds) =>
+      case Some(snapshot) if !snapshot.isStale(Instant.now(), ttl) =>
         F.pure(snapshot.values.values.toList.asRight[Error])
 
       case Some(snapshot) if snapshot.isRefreshing =>
@@ -104,7 +104,7 @@ final class CachedRatesProvider[F[_]](
 
   private def readFreshSnapshot: F[Option[List[Rate]]] =
     F.delay(ratesSnapshotRef.get()).map {
-      case Some(snapshot) if !snapshot.isRefreshing && !snapshot.isStale(Instant.now(), ttlSeconds) =>
+      case Some(snapshot) if !snapshot.isRefreshing && !snapshot.isStale(Instant.now(), ttl) =>
         Some(snapshot.values.values.toList)
       case _ =>
         None

@@ -11,6 +11,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.DurationInt
 import scala.util.Random
 
 class CachedRatesProviderSpec extends AnyFlatSpec with Matchers {
@@ -41,7 +42,7 @@ class CachedRatesProviderSpec extends AnyFlatSpec with Matchers {
       getImpl = _ => IO.pure(Left(ExternalServiceError("This implementation don't use single get."))),
       getAllImpl = IO.pure(Right(List(Rate(ratePair, Price(BigDecimal("156.25")), Timestamp.now))))
     )
-    val provider = new CachedRatesProvider[IO](fakeProvider, ttlSeconds = 60)
+    val provider = new CachedRatesProvider[IO](fakeProvider, ttl = 180.seconds)
 
     val result1 = provider.get(ratePair).unsafeRunSync()
     val result2 = provider.get(ratePair).unsafeRunSync()
@@ -67,7 +68,7 @@ class CachedRatesProviderSpec extends AnyFlatSpec with Matchers {
       getAllImpl = IO.delay(Right(List(Rate(ratePair, Price(BigDecimal(Random.nextDouble())), Timestamp.now))))
     )
 
-    val provider = new CachedRatesProvider[IO](fakeProvider, ttlSeconds = -0)
+    val provider = new CachedRatesProvider[IO](fakeProvider, ttl = -0.seconds)
 
     val result1 = provider.get(ratePair).unsafeRunSync()
     val result2 = provider.get(ratePair).unsafeRunSync()
@@ -131,7 +132,7 @@ class CachedRatesProviderSpec extends AnyFlatSpec with Matchers {
       getAllImpl = IO.delay(Right(List(Rate(ratePair, Price(BigDecimal(Random.nextDouble())), Timestamp.now))))
     )
 
-    val provider = new CachedRatesProvider[IO](fakeProvider, ttlSeconds = -0)
+    val provider = new CachedRatesProvider[IO](fakeProvider, ttl = -0.seconds)
 
     val result1 = provider.getAll.unsafeRunSync()
     val result2 = provider.getAll.unsafeRunSync()

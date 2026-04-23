@@ -12,7 +12,7 @@ import org.http4s.server.middleware.{AutoSlash, Timeout}
 
 class Module[F[_]: Concurrent: Timer](config: ApplicationConfig, httpClient: Client[F]) {
 
-  private val ratesProvider: RatesProvider[F] = RatesProviders.cached(RatesProviders.live(httpClient, config))
+  private val ratesProvider: RatesProvider[F] = RatesProviders.cached(RatesProviders.live(httpClient, config), config)
   private val ratesProgram: Rates[F] = programs.rates.RatesProgram(ratesProvider)
   private val ratesHttpRoutes: HttpRoutes[F] = new RatesHttpRoutes(ratesProgram).routes
 
