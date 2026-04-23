@@ -12,5 +12,11 @@ class DummyRatesProvider[F[_]: Applicative] extends RatesProvider[F] {
   override def get(pair: Rate.Pair): F[Error Either Rate] =
     Rate(pair, Price(BigDecimal(100)), Timestamp.now).asRight[Error].pure[F]
 
-  override def getAll: F[Either[Error, List[Rate]]] = ??? //TODO: Fix
+  override def getAll: F[Either[Error, List[Rate]]] = {
+    val now = Timestamp.now
+    Rate.Pair.supportedPairs
+      .map(pair => Rate(pair, Price(BigDecimal(100)), now))
+      .asRight[Error]
+      .pure[F]
+  }
 }

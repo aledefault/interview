@@ -42,7 +42,7 @@ class OneFrameRatesProvider[F[_]: Sync](
     Uri.unsafeFromString(s"${baseUri}/rates?pair=${pair.from}${pair.to}")
 
   override def getAll: F[Error Either List[Rate]] = {
-    val pairs = supportedPairs
+    val pairs = Rate.Pair.supportedPairs
     val pairQuery = pairs.map(pairToQueryStringPair).mkString("&")
 
     val request = Request[F](
@@ -88,25 +88,4 @@ class OneFrameRatesProvider[F[_]: Sync](
       from = fromCurrency,
       to = toCurrency
     )
-
-  // TODO: Refactor this
-  private val supportedCurrencies: List[Currency] =
-    List(
-      Currency.AUD,
-      Currency.CAD,
-      Currency.CHF,
-      Currency.EUR,
-      Currency.GBP,
-      Currency.NZD,
-      Currency.JPY,
-      Currency.SGD,
-      Currency.USD
-    )
-
-  private val supportedPairs: List[Rate.Pair] =
-    for {
-      from <- supportedCurrencies
-      to   <- supportedCurrencies
-      if from != to
-    } yield Rate.Pair(from, to)
 }
