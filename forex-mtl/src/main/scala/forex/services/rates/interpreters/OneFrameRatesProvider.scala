@@ -26,7 +26,7 @@ class OneFrameRatesProvider[F[_]: Sync](
       response.status match {
         case Status.Ok =>
           response.as[List[OneFrameRateResponse]].map {
-            case head :: _ => Either.right[Error, Rate](toDomainRate(head))
+            case head :: _ => toDomainRate(head)
             case Nil => Either.left[Error, Rate](Error.ExternalServiceError("Invalid success body: empty list"))
           }.handleError { error =>
             Either.left[Error, Rate](Error.ExternalServiceError(s"Invalid success body: ${error.getMessage}"))
@@ -55,7 +55,7 @@ class OneFrameRatesProvider[F[_]: Sync](
         case Status.Ok =>
           response.as[List[OneFrameRateResponse]].map {
             case Nil => Either.left[Error, List[Rate]](Error.ExternalServiceError("Invalid success body: empty list"))
-            case body => Either.right[Error, List[Rate]](body.map(toDomainRate))
+            case body => body.traverse(toDomainRate)
           }.handleError { error =>
             Either.left[Error, List[Rate]](Error.ExternalServiceError(s"Invalid success body: ${error.getMessage}"))
           }
@@ -71,17 +71,22 @@ class OneFrameRatesProvider[F[_]: Sync](
 
   private def pairToQueryStringPair(pair: Rate.Pair): String = s"pair=${pair.from}${pair.to}"
 
-  private def toDomainRate(response: OneFrameRateResponse): Rate =
-    Rate(
-      pair = parsePair(response.from, response.to),
-      price = Price(response.price),
-      timestamp = Timestamp(response.time_stamp)
-    )
+  private def toDomainRate(response: OneFrameRateResponse): Either[Error, Rate] =
+    parsePair(response.from, response.to).map { pair =>
+      Rate(
+        pair = pair,
+        price = Price(response.price),
+        timestamp = Timestamp(response.time_stamp)
+      )
+    }
 
-  private def parsePair(from: String, to: String): Rate.Pair =
-    Rate.Pair(
-      from = Currency.fromString(from),
-      to = Currency.fromString(to)
+  private def parsePair(from: String, to: String): Either[Error, Rate.Pair] =
+    for {
+      fromCurrency <- Currency.fromString(from).leftMap(msg => Error.ExternalServiceError(msg))
+      toCurrency   <- Currency.fromString(to).leftMap(msg => Error.ExternalServiceError(msg))
+    } yield Rate.Pair(
+      from = fromCurrency,
+      to = toCurrency
     )
 
   // TODO: Refactor this

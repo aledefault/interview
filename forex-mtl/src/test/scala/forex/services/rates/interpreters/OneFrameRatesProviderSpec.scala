@@ -1,8 +1,7 @@
 package forex.services.rates.interpreters
 
 import cats.effect.IO
-import forex.config.{ApplicationConfig, CacheRatesConfig, OneFrameConfig}
-import forex.domain.{Currency, Price, Rate, Timestamp}
+import forex.domain.{ Currency, Price, Rate, Timestamp }
 import forex.services.rates.errors.Error
 import io.circe.Encoder
 import io.circe.generic.semiauto._
@@ -15,22 +14,8 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.time.OffsetDateTime
-import scala.concurrent.duration.DurationInt
 
 class OneFrameRatesProviderSpec extends AnyFlatSpec with Matchers {
-
-  private val config = ApplicationConfig(
-    http = null,
-    oneFrame = OneFrameConfig(
-      baseUri = "http://localhost",
-      token = "test-token"
-    ),
-    cacheRates = CacheRatesConfig(
-      ttl = 180.second,
-      retryDelay = 50.millis,
-      maxRetries = 10
-    )
-  )
 
   "OneFrameRatesProvider.get" should "successfully get a rate pair" in {
     val ratePair = Rate.Pair(Currency.USD, Currency.JPY)
@@ -45,7 +30,7 @@ class OneFrameRatesProviderSpec extends AnyFlatSpec with Matchers {
       )
     )
 
-    val provider = new OneFrameRatesProvider[IO](clientReturningJson(responseBody), config)
+    val provider = new OneFrameRatesProvider[IO](clientReturningJson(responseBody), token = "", baseUri = "")
     val result = provider.get(ratePair).unsafeRunSync()
 
     result match {
@@ -59,7 +44,7 @@ class OneFrameRatesProviderSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return an error when the external provider fails" in {
-    val provider = new OneFrameRatesProvider[IO](failingClient("boom"), config)
+    val provider = new OneFrameRatesProvider[IO](failingClient("boom"), token = "", baseUri = "")
     val result = provider.get(Rate.Pair(Currency.USD, Currency.JPY)).unsafeRunSync()
 
     result shouldBe Left(Error.ExternalServiceError("Unexpected error: boom"))
@@ -70,7 +55,7 @@ class OneFrameRatesProviderSpec extends AnyFlatSpec with Matchers {
     val ratePairs = Rate.Pair(Currency.USD, Currency.JPY)::Rate.Pair(Currency.EUR, Currency.JPY)::Nil
     val responses = MakeResponse(ratePairs.head, BigDecimal(1), now)::MakeResponse(ratePairs.last, BigDecimal(2), now)::Nil
 
-    val provider = new OneFrameRatesProvider[IO](clientReturningJson(responses), config)
+    val provider = new OneFrameRatesProvider[IO](clientReturningJson(responses), token = "", baseUri = "")
     val result = provider.getAll.unsafeRunSync()
 
     result match {
@@ -87,7 +72,7 @@ class OneFrameRatesProviderSpec extends AnyFlatSpec with Matchers {
 
   it should "return an error when the external provider fails" in {
     val client = failingClient("boom")
-    val provider = new OneFrameRatesProvider[IO](client, config)
+    val provider = new OneFrameRatesProvider[IO](client, token = "", baseUri = "")
     val result = provider.getAll.unsafeRunSync()
 
     result shouldBe Left(Error.ExternalServiceError("Unexpected error: boom"))
